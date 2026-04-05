@@ -1,15 +1,3 @@
-"""
-predict.py  —  Single-stage disease prediction
-════════════════════════════════════════════════
-Collects only general patient data (demographics, lifestyle, symptoms,
-key lab values). Disease-specific fields (tumor data, lung capacity,
-blood urea, ADL scores, etc.) are NOT collected — the model predicts
-from general medical records alone.
-
-Hard-rule overrides (run BEFORE the model):
-    serum_creatinine > 2.0              → Kidney disease (override)
-    HbA1c > 6.5  AND  avg_glucose > 140 → Diabetes       (override)
-"""
 
 import numpy as np
 import pandas as pd
