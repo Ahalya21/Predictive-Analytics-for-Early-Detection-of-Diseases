@@ -1,3 +1,12 @@
+"""
+predict.py  —  7-disease prediction interface
+═══════════════════════════════════════════════
+FIXES applied:
+  FIX 1 — Loads feature_medians.pkl (saved by disease_prediction.py)
+  FIX 2 — patient dict initialized with medians, not zeros
+  FIX 3 — ask() returns median for skipped/invalid fields, not 0.0
+           This prevents extreme z-scores that biased model toward stroke/alzheimers
+"""
 
 import numpy as np
 import pandas as pd
@@ -5,10 +14,11 @@ import warnings
 import joblib
 
 # ── LOAD ────────────────────────────────────────────────────────────────
-model        = joblib.load('disease_model.pkl')
-scaler       = joblib.load('scaler.pkl')
-le           = joblib.load('label_encoder.pkl')
-feature_cols = joblib.load('feature_cols.pkl')
+model           = joblib.load('disease_model.pkl')
+scaler          = joblib.load('scaler.pkl')
+le              = joblib.load('label_encoder.pkl')
+feature_cols    = joblib.load('feature_cols.pkl')
+feature_medians = joblib.load('feature_medians.pkl')   # FIX 1: load medians
 
 LABELS = {
     'alzheimers': "Alzheimer's disease",
@@ -31,7 +41,6 @@ TIPS = {
 }
 
 # ── QUESTIONS ───────────────────────────────────────────────────────────
-# Only general fields — no disease-specific lab or pathology values.
 QUESTIONS = [
     ('__section__', 'DEMOGRAPHICS', '', ''),
     ('age',    'Age',    'years, e.g. 45',  'number'),
@@ -59,10 +68,14 @@ QUESTIONS = [
 
 
 # ── INPUT HELPER ────────────────────────────────────────────────────────
-def ask(label, hint, input_type):
+# FIX 3: accepts feat name and returns median for skipped/invalid input
+def ask(label, hint, input_type, feat):
     raw = input(f"  {label:<36}  ({hint}): ").strip().lower()
+
+    # Skipped — return median for this feature, not 0.0
     if not raw:
-        return 0.0
+        return feature_medians.get(feat, 0.0)
+
     if input_type == 'gender':
         return 1.0 if raw in ('male', 'm', '1') else 0.0
     if input_type == 'binary':
@@ -70,26 +83,23 @@ def ask(label, hint, input_type):
     try:
         return float(raw)
     except ValueError:
-        return 0.0
+        # Bad input — also return median
+        return feature_medians.get(feat, 0.0)
 
 
 # ── HARD-RULE OVERRIDE ───────────────────────────────────────────────────
-# Only rules based on general lab values that are actually collected.
-# Returns (disease_key, reason_string) if a hard rule fires, else None.
 def check_hard_rules(p):
     creat   = p.get('serum_creatinine',  0.0)
     hba1c   = p.get('HbA1c_level',       0.0)
     glucose = p.get('avg_glucose_level', 0.0)
 
-    # Kidney disease — creatinine critically high
     if creat > 2.0:
         return ('kidney', f'Serum creatinine {creat} mg/dL is critically elevated (normal < 1.2)')
 
-    # Diabetes — both HbA1c and glucose in diabetic range
     if hba1c > 6.5 and glucose > 140:
         return ('diabetic', f'HbA1c {hba1c}% + glucose {glucose} mg/dL both in diabetic range')
 
-    return None   # no hard rule fired — use model prediction
+    return None
 
 
 # ── HEADER ──────────────────────────────────────────────────────────────
@@ -97,7 +107,9 @@ print("  Fill in what you know. Press Enter to skip any field.")
 print()
 
 # ── COLLECT ALL ANSWERS ─────────────────────────────────────────────────
-patient = {f: 0.0 for f in feature_cols}
+# FIX 2: initialize with medians, not zeros
+# This means skipped features are "average person", not extreme outlier
+patient = {f: feature_medians.get(f, 0.0) for f in feature_cols}
 
 for feat, label, hint, itype in QUESTIONS:
     if feat == '__section__':
@@ -105,30 +117,24 @@ for feat, label, hint, itype in QUESTIONS:
         continue
     if feat not in patient:
         continue
-    patient[feat] = ask(label, hint, itype)
+    patient[feat] = ask(label, hint, itype, feat)   # FIX 3: pass feat to ask()
 
 
 # ── HARD-RULE CHECK ──────────────────────────────────────────────────────
 override = check_hard_rules(patient)
 
-warnings.filterwarnings('ignore')   # suppress sklearn feature-name warning
+warnings.filterwarnings('ignore')
 
-# Build input as DataFrame with correct column names
 input_df  = pd.DataFrame([[patient[f] for f in feature_cols]], columns=feature_cols)
 scaled    = scaler.transform(input_df)
 scaled_df = pd.DataFrame(scaled, columns=feature_cols)
 
 if override:
-    # Hard rule fired — skip model prediction, use rule result
     disease, reason = override
     confidence      = 95.0
     override_fired  = True
-
-    # Run model only for informational bar chart
-    pred_proba = model.predict_proba(scaled_df)[0]
-
+    pred_proba      = model.predict_proba(scaled_df)[0]
 else:
-    # Normal model prediction
     override_fired = False
     pred_int   = model.predict(scaled_df)[0]
     pred_proba = model.predict_proba(scaled_df)[0]
@@ -150,11 +156,9 @@ print()
 print(f"  Tip: {TIPS.get(disease, '')}")
 print()
 
-# All 7 diseases — always shown
 print("  Risk probabilities across all 7 diseases:\n")
 BAR = 30
 
-# Build display probabilities for the bar chart
 display_proba = list(zip(le.classes_, pred_proba))
 if override_fired:
     disease_idx = list(le.classes_).index(disease)
