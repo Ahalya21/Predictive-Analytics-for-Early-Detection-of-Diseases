@@ -123,6 +123,9 @@ for feat, label, hint, itype in QUESTIONS:
 # ── HARD-RULE CHECK ──────────────────────────────────────────────────────
 override = check_hard_rules(patient)
 
+if patient.get('tumor_score', 0.0) == 0:
+    patient['tumor_score'] = -1.0   # strong signal: NOT a tumor case
+
 warnings.filterwarnings('ignore')
 
 input_df  = pd.DataFrame([[patient[f] for f in feature_cols]], columns=feature_cols)
