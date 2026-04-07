@@ -478,7 +478,7 @@ FEATURES = [
     'avg_glucose_level', 'HbA1c_level',
     'hypertension', 'heart_disease_history',
     'cholesterol_total', 'cholesterol_ldl', 'cholesterol_hdl', 'triglycerides',
-    'max_heart_rate', 'chest_pain_type',
+    'max_heart_rate', 'chest_pain_type', 'heart_risk_score'
     'resting_bp', 'fasting_blood_sugar', 'exercise_angina', 'st_depression',
     'serum_creatinine', 'albumin', 'blood_urea',
     'blood_pressure', 'specific_gravity',
@@ -538,6 +538,7 @@ stroke = pd.read_csv("healthcare-dataset-stroke-data.csv")
 heart  = pd.read_csv("HeartDiseaseTrain-Test.csv")
 kidney = pd.read_csv("kidney-stone-dataset.csv")
 lung   = pd.read_csv("lung_disease_data.csv")
+
 
 for name, df in [("alzheimers", alz), ("brca", brca), ("diabetic", diab),
                  ("stroke", stroke), ("heart", heart), ("kidney", kidney), ("lung", lung)]:
@@ -631,7 +632,7 @@ alz_df = build('alzheimers', len(alz),
 _radius    = lcol(brca, 'radius_mean')
 _area      = lcol(brca, 'area_mean')
 _concavity = lcol(brca, 'concavity_mean')
-_tscore    = _radius * _concavity   # FIX 1: tumor_score = strong unique brca signal
+_tscore    = (_radius * _concavity)*0.3   # FIX 1: tumor_score = strong unique brca signal
 
 np.random.seed(42)
 brca_df = build('brca', len(brca),
@@ -704,6 +705,12 @@ heart_df = build('heart', len(heart),
     smoking             = lcol(heart, 'smoking', default=0),
     hypertension        = (lcol(heart, 'trestbps', 'resting_bp') > 140).astype(float),
     tumor_score         = pd.Series(np.zeros(len(heart))),
+    heart_risk_score = (
+        lcol(heart, 'cholestoral') * 0.01 +
+        lcol(heart, 'trestbps') * 0.02 +
+        lcol(heart, 'oldpeak') * 2 +
+        lcol(heart, 'thalach') * -0.01
+    ),
 )
 
 # ── KIDNEY ──────────────────────────────────────────────────
@@ -769,6 +776,26 @@ print(combined['disease_source'].value_counts().to_string())
 
 # ── FIX 4: Save feature medians so predict.py can use them instead of zeros ──
 feature_medians = combined[FEATURES].median().to_dict()
+
+# Force disease-specific fields to 0 — median of combined data pulls these
+# non-zero because of disease rows, which would inject tumor/lab values
+# into general patients and bias predictions toward brca/heart/kidney etc.
+FORCE_ZERO = [
+    # brca
+    'tumor_radius', 'tumor_area', 'tumor_concavity', 'tumor_score',
+    # heart
+    'chest_pain_type', 'exercise_angina', 'st_depression',
+    'fasting_blood_sugar', 'max_heart_rate', 'resting_bp',
+    # kidney
+    'specific_gravity', 'albumin', 'blood_urea',
+    # lung
+    'lung_capacity', 'yellow_fingers', 'anxiety',
+    # alzheimers
+    'functional_assessment', 'adl_score',
+]
+for field in FORCE_ZERO:
+    feature_medians[field] = 0.0
+
 joblib.dump(feature_medians, 'feature_medians.pkl')
 print("\n  Saved : feature_medians.pkl  (used by predict.py for missing field imputation)")
 
